@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 defmodule AshPostgres.MigrationGenerator.AshFunctions do
-  @latest_version 7
+  @latest_version 8
   @error_prefix "ash_error: "
 
   def latest_version, do: @latest_version
@@ -79,6 +79,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
 
     #{ash_raise_error()}
 
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
 
     #{uuid_generate_v7(opts)}
@@ -104,6 +106,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     \"\"\")
 
     #{ash_raise_error()}
+
+    #{ash_raise_error_with_token()}
 
     #{ash_required()}
 
@@ -141,6 +145,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     """
     #{ash_raise_error()}
 
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
 
     #{uuid_generate_v7(opts)}
@@ -150,6 +156,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
   def install(2, opts) do
     """
     #{ash_raise_error()}
+
+    #{ash_raise_error_with_token()}
 
     #{ash_required()}
 
@@ -162,6 +170,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     execute("ALTER FUNCTION ash_raise_error(jsonb) STABLE;")
     execute("ALTER FUNCTION ash_raise_error(jsonb, ANYCOMPATIBLE) STABLE")
 
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
 
     #{uuid_generate_v7(opts)}
@@ -173,6 +183,8 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     execute("ALTER FUNCTION ash_raise_error(jsonb) STABLE;")
     execute("ALTER FUNCTION ash_raise_error(jsonb, ANYCOMPATIBLE) STABLE")
 
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
 
     #{uuid_generate_v7(opts)}
@@ -181,14 +193,22 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
 
   def install(5, _opts) do
     """
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
     """
   end
 
   def install(6, _opts) do
     """
+    #{ash_raise_error_with_token()}
+
     #{ash_required()}
     """
+  end
+
+  def install(7, _opts) do
+    ash_raise_error_with_token()
   end
 
   def drop(version, opts \\ [])
@@ -198,40 +218,47 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     execute("ALTER FUNCTION ash_raise_error(jsonb) VOLATILE;")
     execute("ALTER FUNCTION ash_raise_error(jsonb, ANYCOMPATIBLE) VOLATILE")
 
-    execute("DROP FUNCTION IF EXISTS ash_required(ANYCOMPATIBLE, jsonb)")
+    execute("DROP FUNCTION IF EXISTS ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)")
     """
   end
 
   def drop(5, _opts) do
-    "execute(\"DROP FUNCTION IF EXISTS ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
   end
 
   def drop(6, _opts) do
-    "# ash_required/2 was redefined in place in version 7; nothing to roll back"
+    """
+    # ash_required/2 was redefined in place in version 7; nothing to roll back
+    execute("DROP FUNCTION IF EXISTS ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE)")
+    """
+  end
+
+  def drop(7, _opts) do
+    "execute(\"DROP FUNCTION IF EXISTS ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE)\")"
   end
 
   def drop(3, opts) do
-    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
   end
 
   def drop(2, opts) do
     """
     #{ash_raise_error()}
 
-    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
     """
   end
 
   def drop(1, opts) do
-    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
   end
 
   def drop(0, opts) do
-    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_trim_whitespace(text[]), ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_trim_whitespace(text[]), ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
   end
 
   def drop(nil, opts) do
-    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_elixir_and(BOOLEAN, ANYCOMPATIBLE), ash_elixir_and(ANYCOMPATIBLE, ANYCOMPATIBLE), ash_elixir_or(ANYCOMPATIBLE, ANYCOMPATIBLE), ash_elixir_or(BOOLEAN, ANYCOMPATIBLE), ash_trim_whitespace(text[]), ash_required(ANYCOMPATIBLE, jsonb)\")"
+    "execute(\"DROP FUNCTION IF EXISTS #{uuid_v7_drop(opts)}ash_raise_error(jsonb), ash_raise_error(jsonb, ANYCOMPATIBLE), ash_elixir_and(BOOLEAN, ANYCOMPATIBLE), ash_elixir_and(ANYCOMPATIBLE, ANYCOMPATIBLE), ash_elixir_or(ANYCOMPATIBLE, ANYCOMPATIBLE), ash_elixir_or(BOOLEAN, ANYCOMPATIBLE), ash_trim_whitespace(text[]), ash_raise_error(jsonb, ANYELEMENT, ANYCOMPATIBLE), ash_required(ANYCOMPATIBLE, jsonb)\")"
   end
 
   defp ash_required do
@@ -275,6 +302,28 @@ defmodule AshPostgres.MigrationGenerator.AshFunctions do
     BEGIN
         -- Raise an error with the provided JSON data.
         -- The JSON object is converted to text for inclusion in the error message.
+        RAISE EXCEPTION '#{@error_prefix}%', json_data::text;
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql
+    STABLE
+    SET search_path = '';
+    \"\"\")
+    """
+  end
+
+  # `AshPostgres.ErrorExpr` passes a row-dependent `token`, which the function ignores. Postgres
+  # may evaluate a stable call whose arguments are all constants while it plans the query, even
+  # in a `CASE` branch no row takes; the token leaves the call to run only when a row reaches it.
+  defp ash_raise_error_with_token do
+    """
+    execute(\"\"\"
+    CREATE OR REPLACE FUNCTION ash_raise_error(json_data jsonb, type_signal ANYELEMENT, token ANYCOMPATIBLE)
+    RETURNS ANYELEMENT AS $$
+    BEGIN
+        -- Raise an error with the provided JSON data.
+        -- The JSON object is converted to text for inclusion in the error message.
+        -- 'token' is intentionally ignored; its presence makes the call non-constant at the call site.
         RAISE EXCEPTION '#{@error_prefix}%', json_data::text;
         RETURN NULL;
     END;

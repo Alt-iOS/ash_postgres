@@ -23,6 +23,49 @@ defmodule AshPostgres.ErrorExprTest do
     end
   end
 
+  test "an error in a branch no row takes doesn't raise while Postgres plans the query" do
+    post =
+      Post
+      |> Ash.Changeset.for_create(:create, %{title: "title", score: 1})
+      |> Ash.create!()
+
+    AshPostgres.Test.Comment
+    |> Ash.Changeset.for_create(:create, %{title: "x"})
+    |> Ash.Changeset.manage_relationship(:post, post, type: :append_and_remove)
+    |> Ash.create!()
+
+    # Under `or`, the `exists` stays a subquery and the parent's score is a parameter there, so
+    # the comparison's right side is constant to the comments it scans. Postgres estimates it by
+    # evaluating the stable error call ahead of time, unless the call has a row-dependent argument.
+    assert [%{id: id}] =
+             Post
+             |> Ash.Query.filter(
+               score == 2 or
+                 exists(
+                   comments,
+                   title ==
+                     if(parent(score) > 100,
+                       do: error(Ash.Error.Query.InvalidFilterValue, message: "never", value: 10),
+                       else: "x"
+                     )
+                 )
+             )
+             |> Ash.read!()
+
+    assert id == post.id
+  end
+
+  test "the data layer's calculate, with no row to refer to, returns the expression's error" do
+    {:ok, expression} =
+      Ash.Filter.hydrate_refs(
+        expr(error(Ash.Error.Query.InvalidFilterValue, message: "always raises", value: 10)),
+        %{resource: Post}
+      )
+
+    assert {:error, %Ash.Error.Query.InvalidFilterValue{message: "always raises"}} =
+             AshPostgres.DataLayer.calculate(Post, [expression], %{})
+  end
+
   test "exceptions in calculations are treated as regular Ash exceptions" do
     Post
     |> Ash.Changeset.for_create(:create, %{title: "title"})

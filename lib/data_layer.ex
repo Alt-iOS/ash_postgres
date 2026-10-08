@@ -2556,8 +2556,11 @@ defmodule AshPostgres.DataLayer do
 
     {:ok, query} = Ash.Query.data_layer_query(ash_query)
 
+    # The expressions are selected from `(VALUES(1))`, with no row of the resource to refer to.
     query =
-      AshSql.Bindings.default_bindings(query, resource, AshPostgres.SqlImplementation)
+      query
+      |> AshSql.Bindings.default_bindings(resource, AshPostgres.SqlImplementation)
+      |> Map.update!(:__ash_bindings__, &Map.put(&1, :no_row?, true))
 
     try do
       {dynamics, query} =
@@ -2594,7 +2597,12 @@ defmodule AshPostgres.DataLayer do
       end)
     rescue
       e ->
-        handle_raised_error(e, __STACKTRACE__, query, resource)
+        # `calculate/3` returns `{:ok, _}` or `{:error, _}`; there is no transaction of its own to
+        # keep from rolling back.
+        case handle_raised_error(e, __STACKTRACE__, query, resource) do
+          {:error, :no_rollback, error} -> {:error, error}
+          other -> other
+        end
     end
   end
 

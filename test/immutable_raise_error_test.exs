@@ -5,6 +5,8 @@
 defmodule AshPostgres.ImmutableRaiseErrorTest do
   use AshPostgres.RepoCase, async: false
 
+  import Ash.Expr
+
   alias AshPostgres.Test.ImmutableErrorTester
 
   setup do
@@ -92,6 +94,17 @@ defmodule AshPostgres.ImmutableRaiseErrorTest do
       assert error.string_array_value == ["alpha", "beta"]
       assert error.nullable_string_value == nil
     end
+  end
+
+  test "the data layer's calculate, with no row to refer to, returns the expression's error" do
+    {:ok, expression} =
+      Ash.Filter.hydrate_refs(
+        expr(error(Ash.Error.Query.InvalidFilterValue, message: "always raises", value: 10)),
+        %{resource: AshPostgres.Test.Post}
+      )
+
+    assert {:error, %Ash.Error.Query.InvalidFilterValue{message: "always raises"}} =
+             AshPostgres.DataLayer.calculate(AshPostgres.Test.Post, [expression], %{})
   end
 
   defp create_tester do

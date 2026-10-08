@@ -318,24 +318,23 @@ defmodule AshPostgres.SqlImplementation do
         query,
         %Ash.Query.Function.Error{} = value,
         bindings,
-        embedded?,
+        _embedded?,
         acc,
         type
       ) do
     resource = query.__ash_bindings__.resource
     repo = AshSql.dynamic_repo(resource, AshPostgres.SqlImplementation, query)
 
-    if repo.immutable_expr_error?() do
-      AshPostgres.Extensions.ImmutableRaiseError.immutable_error_expr(
-        query,
-        value,
-        bindings,
-        embedded?,
-        acc,
-        type
-      )
-    else
-      :error
+    cond do
+      repo.immutable_expr_error?() ->
+        AshPostgres.ErrorExpr.expr(query, value, bindings, acc, type, :immutable)
+
+      # Without them, AshSql raises that `error/2` needs them.
+      "ash-functions" in repo.installed_extensions() ->
+        AshPostgres.ErrorExpr.expr(query, value, bindings, acc, type, :stable)
+
+      true ->
+        :error
     end
   end
 

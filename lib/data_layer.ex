@@ -2052,10 +2052,18 @@ defmodule AshPostgres.DataLayer do
                       attribute -> [attribute]
                     end
 
+                  # A column the database generates from others changes with them, so
+                  # the value it returned is taken too, where the query selected it.
+                  generated =
+                    for %{generated?: true, name: name} <-
+                          Ash.Resource.Info.attributes(resource),
+                        is_nil(options[:action_select]) or name in options[:action_select],
+                        do: name
+
                   modifying =
                     Map.keys(changeset.attributes) ++
                       Keyword.keys(changeset.atomics) ++
-                      Ash.Resource.Info.primary_key(resource) ++ temporal_attrs
+                      Ash.Resource.Info.primary_key(resource) ++ temporal_attrs ++ generated
 
                   result = hd(results)
 

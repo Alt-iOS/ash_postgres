@@ -13,6 +13,7 @@ defmodule AshPostgres.Test.Domain do
     resource(AshPostgres.Test.ProjectTickets.Comment)
 
     resource(AshPostgres.Test.CoAuthorPost)
+    resource(AshPostgres.Test.Tally)
 
     resource(AshPostgres.Test.Post) do
       define(:review, action: :review)

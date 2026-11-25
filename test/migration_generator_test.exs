@@ -193,6 +193,88 @@ defmodule AshPostgres.MigrationGeneratorTest do
     end
   end
 
+  # `Author` and `Book`, whose reference to it is `deferrable`: tenant tables (context
+  # multitenancy) when `tenant?: true`, in `schema:` when given.
+  defmacrop defdeferrablebooks(deferrable, opts) do
+    extra =
+      Enum.filter(
+        [
+          opts[:tenant?] && quote(do: multitenancy(do: strategy(:context))),
+          opts[:schema] && quote(do: postgres(do: schema(unquote(opts[:schema]))))
+        ],
+        & &1
+      )
+
+    quote do
+      defresource Author, "authors" do
+        attributes do
+          uuid_primary_key(:id)
+        end
+
+        unquote_splicing(extra)
+      end
+
+      defresource Book, "books" do
+        attributes do
+          uuid_primary_key(:id)
+        end
+
+        relationships do
+          belongs_to(:author, Author, public?: true)
+        end
+
+        postgres do
+          references do
+            reference(:author, deferrable: unquote(deferrable))
+          end
+        end
+
+        unquote_splicing(extra)
+      end
+    end
+  end
+
+  defp generate_tenant_migrations(domain, [snapshot_path, migration_path, tenant_migration_path]) do
+    AshPostgres.MigrationGenerator.generate(domain,
+      snapshot_path: snapshot_path,
+      migration_path: migration_path,
+      tenant_migration_path: tenant_migration_path,
+      quiet: true,
+      format: false,
+      auto_name: true
+    )
+  end
+
+  # The up and down sides of each migration generated into `path`, oldest first.
+  defp migration_sides(path) do
+    "#{path}/**/*_migrate_resources*.exs"
+    |> Path.wildcard()
+    |> Enum.reject(&String.contains?(&1, "extensions"))
+    |> Enum.sort()
+    |> Enum.map(&(&1 |> File.read!() |> String.split("def down", parts: 2) |> List.to_tuple()))
+  end
+
+  # A reference made deferred, then deferrable, then not deferrable: each migration alters
+  # the constraint on `qualified_table` forwards in `up` and back in `down`; the first one
+  # creates the constraint, so rolling it back has nothing to alter (issue #595).
+  defp assert_deferrability_statements(
+         [{up1, down1}, {up2, down2}, {up3, down3}],
+         qualified_table
+       ) do
+    statement = fn form ->
+      ~s{execute("ALTER TABLE #{qualified_table} ALTER CONSTRAINT books_author_id_fkey #{form}")}
+    end
+
+    assert up1 =~ statement.("DEFERRABLE INITIALLY DEFERRED")
+    refute down1 =~ "ALTER CONSTRAINT"
+
+    assert up2 =~ statement.("DEFERRABLE INITIALLY IMMEDIATE")
+    assert down2 =~ statement.("DEFERRABLE INITIALLY DEFERRED")
+
+    assert up3 =~ statement.("NOT DEFERRABLE")
+    assert down3 =~ statement.("DEFERRABLE INITIALLY IMMEDIATE")
+  end
+
   describe "empty resources" do
     setup do
       :ok
@@ -1726,6 +1808,56 @@ defmodule AshPostgres.MigrationGeneratorTest do
       assert File.read!(file2) =~ ~S[rename table(:posts, prefix: "example"), :title, to: :name]
     end
 
+    test "when renaming an index, the new name is not qualified", %{
+      snapshot_path: snapshot_path,
+      migration_path: migration_path
+    } do
+      defposts do
+        postgres do
+          schema("example")
+        end
+
+        identities do
+          identity(:title, [:title])
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+          attribute(:title, :string, public?: true)
+        end
+      end
+
+      defdomain([Post])
+      generate_post_migration(Domain, snapshot_path, migration_path)
+
+      defposts do
+        postgres do
+          schema("example")
+          identity_index_names(title: "titles_r_unique_dawg")
+        end
+
+        identities do
+          identity(:title, [:title])
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+          attribute(:title, :string, public?: true)
+        end
+      end
+
+      defdomain([Post])
+      generate_post_migration(Domain, snapshot_path, migration_path)
+
+      {up, down} = List.last(migration_sides(migration_path))
+
+      assert up =~
+               ~S[execute("ALTER INDEX example.posts_title_index RENAME TO titles_r_unique_dawg")]
+
+      assert down =~
+               ~S[execute("ALTER INDEX example.titles_r_unique_dawg RENAME TO posts_title_index")]
+    end
+
     test "renaming a field honors additional changes", %{
       snapshot_path: snapshot_path,
       migration_path: migration_path
@@ -2056,6 +2188,62 @@ defmodule AshPostgres.MigrationGeneratorTest do
 
       assert File.read!(file2) =~
                ~S[ALTER INDEX posts_title_index RENAME TO titles_r_unique_dawg]
+    end
+
+    test "when renaming an index of a tenant table, it is renamed in the tenant's schema", %{
+      snapshot_path: snapshot_path,
+      migration_path: migration_path,
+      tenant_migration_path: tenant_migration_path
+    } do
+      paths = [snapshot_path, migration_path, tenant_migration_path]
+
+      defposts do
+        identities do
+          identity(:title, [:title])
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+          attribute(:title, :string, public?: true)
+        end
+
+        multitenancy do
+          strategy(:context)
+        end
+      end
+
+      defdomain([Post])
+      generate_tenant_migrations(Domain, paths)
+
+      defposts do
+        postgres do
+          identity_index_names(title: "titles_r_unique_dawg")
+        end
+
+        identities do
+          identity(:title, [:title])
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+          attribute(:title, :string, public?: true)
+        end
+
+        multitenancy do
+          strategy(:context)
+        end
+      end
+
+      defdomain([Post])
+      generate_tenant_migrations(Domain, paths)
+
+      assert [_, {up, down}] = migration_sides(tenant_migration_path)
+
+      assert up =~
+               ~S[execute("ALTER INDEX \"#{prefix()}\".posts_title_index RENAME TO titles_r_unique_dawg")]
+
+      assert down =~
+               ~S[execute("ALTER INDEX \"#{prefix()}\".titles_r_unique_dawg RENAME TO posts_title_index")]
     end
 
     test "when changing the where clause, it is properly dropped and recreated", %{
@@ -3577,6 +3765,55 @@ defmodule AshPostgres.MigrationGeneratorTest do
                ~S{ALTER TABLE books ALTER CONSTRAINT books_author_id_fkey DEFERRABLE INITIALLY DEFERRED}
 
       refute down =~ "ALTER CONSTRAINT"
+    end
+
+    test "a tenant table's deferrable reference is altered in the tenant's schema", %{
+      snapshot_path: snapshot_path,
+      migration_path: migration_path,
+      tenant_migration_path: tenant_migration_path
+    } do
+      paths = [snapshot_path, migration_path, tenant_migration_path]
+
+      defdeferrablebooks(:initially, tenant?: true)
+      defdomain([Author, Book])
+      generate_tenant_migrations(Domain, paths)
+      defdeferrablebooks(true, tenant?: true)
+      generate_tenant_migrations(Domain, paths)
+      defdeferrablebooks(false, tenant?: true)
+      generate_tenant_migrations(Domain, paths)
+
+      assert_deferrability_statements(
+        migration_sides(tenant_migration_path),
+        ~S[\"#{prefix()}\".books]
+      )
+
+      for {up, down} <- migration_sides(migration_path) do
+        refute up =~ "ALTER CONSTRAINT"
+        refute down =~ "ALTER CONSTRAINT"
+      end
+    end
+
+    for {name, schema, qualified_table} <- [
+          {"without a schema", nil, "books"},
+          {"in a schema", "example", "example.books"}
+        ] do
+      test "a deferrable reference on a table #{name} is altered on that table", %{
+        snapshot_path: snapshot_path,
+        migration_path: migration_path
+      } do
+        defdeferrablebooks(:initially, schema: unquote(schema))
+        defdomain([Author, Book])
+        generate_post_migration(Domain, snapshot_path, migration_path)
+        defdeferrablebooks(true, schema: unquote(schema))
+        generate_post_migration(Domain, snapshot_path, migration_path)
+        defdeferrablebooks(false, schema: unquote(schema))
+        generate_post_migration(Domain, snapshot_path, migration_path)
+
+        assert_deferrability_statements(
+          migration_sides(migration_path),
+          unquote(qualified_table)
+        )
+      end
     end
 
     test "index generated by index? true also adds column when using attribute multitenancy", %{

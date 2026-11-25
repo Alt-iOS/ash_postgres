@@ -610,7 +610,7 @@ defmodule AshPostgres.MigrationGenerator.Operation do
 
   defmodule AlterDeferrability do
     @moduledoc false
-    defstruct [:table, :schema, :references, :direction, no_phase: true]
+    defstruct [:table, :schema, :references, :direction, :multitenancy, no_phase: true]
 
     defp prefix_name(name, prefix) do
       if prefix do
@@ -619,6 +619,10 @@ defmodule AshPostgres.MigrationGenerator.Operation do
         name
       end
     end
+
+    # A tenant table (context multitenancy) is in the tenant's schema, the runtime `prefix()`.
+    def up(%{direction: :up, multitenancy: %{strategy: :context}} = op),
+      do: up(%{op | schema: "\\\"\#{prefix()}\\\"", multitenancy: nil})
 
     def up(%{
           direction: :up,
@@ -1663,6 +1667,11 @@ defmodule AshPostgres.MigrationGenerator.Operation do
       end
     end
 
+    # A tenant table's index (context multitenancy) is in the tenant's schema, the runtime
+    # `prefix()`. PostgreSQL takes the new name of `RENAME TO` unqualified.
+    def up(%{multitenancy: %{strategy: :context}} = op),
+      do: up(%{op | schema: "\\\"\#{prefix()}\\\"", multitenancy: nil})
+
     def up(%{
           old_identity: %{index_name: old_index_name, name: old_name},
           new_identity: %{index_name: new_index_name},
@@ -1672,8 +1681,11 @@ defmodule AshPostgres.MigrationGenerator.Operation do
       old_index_name = old_index_name || "#{table}_#{old_name}_index"
 
       "execute(\"ALTER INDEX #{prefix_name(old_index_name, schema)} " <>
-        "RENAME TO #{prefix_name(new_index_name, schema)}\")\n"
+        "RENAME TO #{new_index_name}\")\n"
     end
+
+    def down(%{multitenancy: %{strategy: :context}} = op),
+      do: down(%{op | schema: "\\\"\#{prefix()}\\\"", multitenancy: nil})
 
     def down(%{
           old_identity: %{index_name: old_index_name, name: old_name},
@@ -1684,7 +1696,7 @@ defmodule AshPostgres.MigrationGenerator.Operation do
       old_index_name = old_index_name || "#{table}_#{old_name}_index"
 
       "execute(\"ALTER INDEX #{prefix_name(new_index_name, schema)} " <>
-        "RENAME TO #{prefix_name(old_index_name, schema)}\")\n"
+        "RENAME TO #{old_index_name}\")\n"
     end
   end
 
